@@ -68,6 +68,7 @@
     .dia.p .codigo { color:#0756ae; background:#dceaff; }
     .dia.f .codigo { color:#08783e; background:#d8f2e3; }
     .dia.ferias .codigo { color:#a84a0c; background:#ffead1; }
+    .dia .codigo:empty { display:none; }
     .dia.feriado { border:3px solid #16835a; background:linear-gradient(145deg,#e7f8f0,#f5fffa); box-shadow:0 0 0 2px rgba(22,131,90,.12); }
     .dia.feriado .numero { color:#075d34; }
     .dia .marca-feriado { position:absolute; top:7px; right:7px; max-width:calc(100% - 35px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 6px; border-radius:6px; background:#08783e; color:#fff; font-size:.56rem; font-weight:850; }
@@ -79,7 +80,17 @@
     .balao-aniversario::before { content:'🎈'; margin-right:3px; }
     .dia.aniversario { min-height:96px; }
     .dia.aniversario .marca-anotacao { display:none; }
-    .dia .ferias-equipe { position:absolute; z-index:2; left:7px; bottom:38px; max-width:calc(100% - 14px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#9a4d08; font-size:.64rem; font-weight:800; }
+    .dia .ferias-equipe { position:absolute; z-index:2; left:6px; right:6px; top:31px; bottom:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 5px; border-radius:6px; background:#ffead1; color:#8a430c; font-size:.58rem; font-weight:800; }
+    .dia.tem-ferias-equipe { min-height:105px; }
+    .dia.aniversario.tem-ferias-equipe { min-height:132px; }
+    .dia.aniversario .ferias-equipe { top:58px; }
+    @media(max-width:700px) { .dia.tem-ferias-equipe { min-height:105px; } .dia.aniversario.tem-ferias-equipe { min-height:132px; } .dia.aniversario .ferias-equipe { top:55px; } }
+    .aviso-sincronizacao { margin:0 0 16px; padding:14px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; background:#fff8e9; border:1px solid #e9b85e; border-radius:12px; color:#694509; }
+    .aviso-sincronizacao[hidden] { display:none; }
+    .aviso-sincronizacao strong { display:block; margin-bottom:4px; }
+    .aviso-sincronizacao p { margin:0; font-size:.86rem; }
+    .aviso-sincronizacao button { background:#94600d; color:#fff; padding:0 15px; }
+    .aviso-sincronizacao button:disabled { opacity:.65; cursor:wait; }
     .dia .marca-anotacao { position:absolute; left:7px; bottom:9px; color:#9a6100; font-size:1.12rem; line-height:1; }
     .dia.com-anotacao {
       border:4px solid #f0a500;
@@ -108,6 +119,10 @@
   <header><div class="wrap"><h1>Consulta de escala</h1><p>Selecione seu nome e uma data para consultar a programação.</p></div></header>
   <main>
     <section class="painel">
+      <div id="avisoSincronizacao" class="aviso-sincronizacao" role="status" aria-live="polite" hidden>
+        <div><strong>⚠ Não foi possível sincronizar a escala</strong><p id="textoAvisoSincronizacao">As informações exibidas podem estar desatualizadas. A edição está temporariamente bloqueada.</p></div>
+        <button type="button" id="btnReconectar">Tentar novamente</button>
+      </div>
       <div class="filtros">
         <div><label for="pessoa">COLABORADOR</label><select id="pessoa"></select></div>
         <div><label for="data">DATA</label><input id="data" type="date"></div>
@@ -203,7 +218,35 @@
       if (prefer) cabecalhos.Prefer = prefer;
       return cabecalhos;
     }
+    // Somente dados confirmados pelo servidor podem ser editados.
+    let sincronizacaoDisponivel = false;
+    let sincronizacaoPendente = false;
+    let consultaEmAndamento = false;
+    const avisoSincronizacao = document.querySelector('#avisoSincronizacao');
+    const textoAvisoSincronizacao = document.querySelector('#textoAvisoSincronizacao');
+    const btnReconectar = document.querySelector('#btnReconectar');
+    const idsEdicao = ['btnConfigurar','btnFerias','btnSalvar','btnAdicionarColaborador',
+      'btnSalvarFerias','btnSalvarAnotacao','btnExcluirAnotacao'];
+    function atualizarEstadoSincronizacao() {
+      avisoSincronizacao.hidden = sincronizacaoDisponivel && !sincronizacaoPendente;
+      textoAvisoSincronizacao.textContent = sincronizacaoPendente
+        ? 'Uma alteração não foi confirmada pelo servidor. Preserve esta aba e confira os dados antes de recarregar.'
+        : 'A conexão está indisponível. Os dados locais podem estar desatualizados. Edições bloqueadas; nova tentativa a cada 60 segundos.';
+      idsEdicao.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !sincronizacaoDisponivel || sincronizacaoPendente;
+      });
+      document.querySelectorAll('[data-remover-ferias],.remover-colaborador').forEach(el => {
+        el.disabled = !sincronizacaoDisponivel || sincronizacaoPendente;
+      });
+    }
+    function permitirEdicao() {
+      if (sincronizacaoDisponivel && !sincronizacaoPendente) return true;
+      alert('Não é possível editar enquanto os dados online não estiverem confirmados.');
+      return false;
+    }
     async function salvarDadosOnline() {
+      if (!permitirEdicao()) return false;
       try {
         const resposta = await fetch(`${URL_DADOS_ONLINE}?on_conflict=id`, {
           method: 'POST',
@@ -219,31 +262,47 @@
         return true;
       } catch (erro) {
         console.error('Falha ao sincronizar a escala:', erro);
-        alert('A alteração ficou salva neste aparelho, mas não foi possível sincronizá-la agora. Verifique a internet e tente salvar novamente.');
+        sincronizacaoPendente = true;
+        sincronizacaoDisponivel = false;
+        atualizarEstadoSincronizacao();
+        alert('A alteração foi mantida neste navegador, mas a gravação online não foi confirmada. Não recarregue a aba antes de conferir os dados.');
         return false;
       }
     }
     async function carregarDadosOnline() {
+      if (consultaEmAndamento || sincronizacaoPendente) return;
+      consultaEmAndamento = true;
+      btnReconectar.disabled = true;
       try {
         const resposta = await fetch(`${URL_DADOS_ONLINE}?id=eq.${encodeURIComponent(ID_ESCALA_ONLINE)}&select=equipe,anotacoes`, {
-          headers: cabecalhosSupabase()
+          headers: cabecalhosSupabase(), cache: 'no-store'
         });
         if (!resposta.ok) throw new Error(await resposta.text());
-        const [registro] = await resposta.json();
-        if (registro) {
-          if (registro.equipe && Object.keys(registro.equipe).length) configEquipe = normalizarEquipe(registro.equipe);
-          anotacoesDatas = registro.anotacoes || {};
-          localStorage.setItem(CHAVE_EQUIPE, JSON.stringify(configEquipe));
-          localStorage.setItem(CHAVE_ANOTACOES, JSON.stringify(anotacoesDatas));
-          preencherPessoas(pessoa.value);
-          renderizar();
-        } else {
-          await salvarDadosOnline();
-        }
+        const registros = await resposta.json();
+        if (!Array.isArray(registros) || !registros.length) throw new Error('Registro da escala não encontrado no Supabase.');
+        const registro = registros[0];
+        if (!registro.equipe || !Object.keys(registro.equipe).length) throw new Error('Equipe online vazia: edição bloqueada para proteção.');
+        configEquipe = normalizarEquipe(registro.equipe);
+        anotacoesDatas = registro.anotacoes || {};
+        localStorage.setItem(CHAVE_EQUIPE, JSON.stringify(configEquipe));
+        localStorage.setItem(CHAVE_ANOTACOES, JSON.stringify(anotacoesDatas));
+        preencherPessoas(pessoa.value);
+        renderizar();
+        sincronizacaoDisponivel = true;
       } catch (erro) {
         console.error('Falha ao carregar a escala online:', erro);
+        sincronizacaoDisponivel = false;
+      } finally {
+        consultaEmAndamento = false;
+        btnReconectar.disabled = false;
+        atualizarEstadoSincronizacao();
       }
     }
+    btnReconectar.addEventListener('click', carregarDadosOnline);
+    setInterval(() => {
+      if (!sincronizacaoDisponivel && !sincronizacaoPendente && !document.hidden) carregarDadosOnline();
+    }, 60000);
+    atualizarEstadoSincronizacao();
 
     function escaparHtml(valor) {
       return String(valor).replace(/[&<>"']/g, caractere => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[caractere]);
@@ -275,10 +334,15 @@
     for(let ano=Number(primeira.slice(0,4));ano<=Number(ultima.slice(0,4));ano++) Object.assign(FERIADOS,feriadosDoAno(ano));
     function feriadoEm(data) { return FERIADOS[isoLocal(data)] || ''; }
     function estaDeFerias(cfg,data) {
-      if (!cfg?.feriasInicio || Number(cfg.feriasDias)<1) return false;
-      const [a,m,d]=cfg.feriasInicio.split('-').map(Number);
-      const inicio=new Date(a,m-1,d), fim=new Date(a,m-1,d+Number(cfg.feriasDias)-1);
-      return data>=inicio && data<=fim;
+      const periodos = Array.isArray(cfg?.feriasPeriodos) ? cfg.feriasPeriodos : [];
+      const dia = new Date(data.getFullYear(),data.getMonth(),data.getDate());
+      return periodos.some(periodo => {
+        if (!periodo?.inicio || Number(periodo.dias) < 1) return false;
+        const [ano,mes,diaInicio] = periodo.inicio.split('-').map(Number);
+        const inicio = new Date(ano,mes-1,diaInicio);
+        const fim = adicionarDias(inicio,Number(periodo.dias)-1);
+        return dia >= inicio && dia <= fim;
+      });
     }
     function pessoasDeFerias(data) {
       return pessoasDisponiveis().filter(id=>estaDeFerias(configEquipe[id],data)).map(id=>configEquipe[id].nome||id);
@@ -400,8 +464,8 @@
         const marca = temAnotacao && !aniversario ? `<span class="marca-anotacao" title="${escaparHtml(textoAnotado)}">📝</span>` : '';
         const balaoAniversario = aniversario ? `<span class="balao-aniversario" title="${escaparHtml(textoAnotado)}">${escaparHtml(textoAnotado)}</span>` : '';
         const marcaFeriado=feriado ? `<span class="marca-feriado" title="${escaparHtml(feriado)}">${natal ? '🎄 NATAL' : 'FERIADO'}</span>` : '';
-        const marcaFerias=feriasEquipe.length ? `<span class="ferias-equipe" title="De férias: ${escaparHtml(feriasEquipe.join(', '))}">☀ ${escaparHtml(feriasEquipe.join(', '))}</span>` : '';
-        calendario.insertAdjacentHTML('beforeend',`<button class="dia ${classe} ${selecionado} ${temAnotacao ? 'com-anotacao' : ''} ${natal ? 'natal' : ''} ${aniversario ? 'aniversario' : ''}" data-data="${chaveData}" title="${escaparHtml([feriado,textoAnotado].filter(Boolean).join(' • '))}"><span class="numero">${d}</span>${marcaFeriado}${balaoAniversario}${marca}${marcaFerias}<span class="codigo">${codigo||''}</span></button>`);
+        const marcaFerias=feriasEquipe.length ? `<span class="ferias-equipe" title="Férias: ${escaparHtml(feriasEquipe.join(', '))}">Férias: ${escaparHtml(feriasEquipe.join(', '))}</span>` : '';
+        calendario.insertAdjacentHTML('beforeend',`<button class="dia ${classe} ${selecionado} ${temAnotacao ? 'com-anotacao' : ''} ${natal ? 'natal' : ''} ${aniversario ? 'aniversario' : ''} ${feriasEquipe.length ? 'tem-ferias-equipe' : ''}" data-data="${chaveData}" title="${escaparHtml([feriado,textoAnotado].filter(Boolean).join(' • '))}"><span class="numero">${d}</span>${marcaFeriado}${balaoAniversario}${marca}${marcaFerias}${codigo ? `<span class="codigo">${codigo}</span>` : ''}</button>`);
       }
       if (bloco?.observacoes.length) {
         observacoes.hidden=false;
@@ -431,13 +495,14 @@
     });
     configLinhas.addEventListener('click',e=>{
       const botao=e.target.closest('.remover-colaborador');
-      if (!botao) return;
+      if (!botao || !permitirEdicao()) return;
       const total=configLinhas.querySelectorAll('[data-id]').length;
       if (total<=1) return alert('A equipe precisa ter pelo menos um colaborador.');
       botao.closest('[data-id]').remove();
     });
     document.querySelector('#btnCancelar').addEventListener('click',()=>configuracoes.hidden=true);
     document.querySelector('#btnSalvar').addEventListener('click',async()=>{
+      if (!permitirEdicao()) return;
       const selecionada=pessoa.value;
       const novaEquipe={};
       configLinhas.querySelectorAll('[data-id]').forEach(linha=>{const id=linha.dataset.id,cadastroAnterior=configEquipe[id]||{}; const nome=linha.querySelector('.cfg-nome').value.trim(); if(!nome)return; novaEquipe[id]={nome,setor:linha.querySelector('.cfg-setor').value.trim(),cargaHoraria:linha.querySelector('.cfg-carga').value,semana:linha.querySelector('.cfg-semana').value.trim(),sabado:linha.querySelector('.cfg-sabado').value.trim(),domingo:linha.querySelector('.cfg-domingo').value.trim(),feriasPeriodos:Array.isArray(cadastroAnterior.feriasPeriodos)?cadastroAnterior.feriasPeriodos:[]};});
@@ -456,13 +521,16 @@
     feriasPessoa.addEventListener('change',carregarFeriasSelecionadas);
     document.querySelector('#btnCancelarFerias').addEventListener('click',()=>painelFerias.hidden=true);
     document.querySelector('#btnSalvarFerias').addEventListener('click',async()=>{
+      if (!permitirEdicao()) return;
       const dias=Number(feriasDias.value)||0;if(!feriasInicio.value||dias<1)return alert('Informe a data de início e uma quantidade de dias maior que zero.');
       const cfg=configEquipe[feriasPessoa.value];if(!Array.isArray(cfg.feriasPeriodos))cfg.feriasPeriodos=[];const novoInicio=feriasInicio.value,[a,m,d]=novoInicio.split('-').map(Number),novoFim=adicionarDias(new Date(a,m-1,d),dias-1);
       const sobreposto=cfg.feriasPeriodos.some(p=>{const [pa,pm,pd]=p.inicio.split('-').map(Number),inicio=new Date(pa,pm-1,pd),fim=adicionarDias(inicio,Number(p.dias)-1);return new Date(a,m-1,d)<=fim&&novoFim>=inicio;});
       if(sobreposto)return alert('Este período se sobrepõe a outro período de férias já cadastrado.');cfg.feriasPeriodos.push({inicio:novoInicio,dias});cfg.feriasPeriodos.sort((x,y)=>x.inicio.localeCompare(y.inicio));localStorage.setItem(CHAVE_EQUIPE,JSON.stringify(configEquipe));await salvarDadosOnline();carregarFeriasSelecionadas();renderizar();
     });
-    feriasLista.addEventListener('click',async e=>{const botao=e.target.closest('[data-remover-ferias]');if(!botao)return;const cfg=configEquipe[feriasPessoa.value],indice=Number(botao.dataset.removerFerias);if(!confirm('Remover somente este período de férias?'))return;cfg.feriasPeriodos.splice(indice,1);localStorage.setItem(CHAVE_EQUIPE,JSON.stringify(configEquipe));await salvarDadosOnline();carregarFeriasSelecionadas();renderizar();});
+    feriasLista.addEventListener('click',async e=>{
+      if (!permitirEdicao()) return;const botao=e.target.closest('[data-remover-ferias]');if(!botao)return;const cfg=configEquipe[feriasPessoa.value],indice=Number(botao.dataset.removerFerias);if(!confirm('Remover somente este período de férias?'))return;cfg.feriasPeriodos.splice(indice,1);localStorage.setItem(CHAVE_EQUIPE,JSON.stringify(configEquipe));await salvarDadosOnline();carregarFeriasSelecionadas();renderizar();});
     document.querySelector('#btnSalvarAnotacao').addEventListener('click',async()=>{
+      if (!permitirEdicao()) return;
       if (!dataInput.value) return;
       const texto = textoAnotacao.value.trim();
       const diaMes = chaveDiaMes(dataInput.value);
@@ -474,6 +542,7 @@
       renderizar();
     });
     btnExcluirAnotacao.addEventListener('click',async()=>{
+      if (!permitirEdicao()) return;
       if (!dataInput.value || !textoDaAnotacao(dataInput.value)) return;
       const diaMes = chaveDiaMes(dataInput.value);
       Object.keys(anotacoesDatas).forEach(data => { if (chaveDiaMes(data)===diaMes && ehAniversario(anotacoesDatas[data])) delete anotacoesDatas[data]; });
