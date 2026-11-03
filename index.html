@@ -181,7 +181,7 @@
     const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const hoje = new Date();
     const chaves = Object.keys(ESCALA).sort();
-    const primeira = chaves[0], ultima = chaves.at(-1);
+    const primeira = chaves[0], ultima = '2030-12';
 
     const CHAVE_EQUIPE = 'escalaEquipeMarciellenV2';
     const CHAVE_ANOTACOES = 'escalaAnotacoesMarciellen';
@@ -315,24 +315,36 @@
       return new Date(ano,mes-1,dia);
     }
     function adicionarDias(data,dias) { return new Date(data.getFullYear(),data.getMonth(),data.getDate()+dias); }
+    // Feriados apresentados no calendario; Carnaval segue a convencao visual da equipe.
+    // Datas comemorativas e pontos facultativos nao alteram plantao ou folga.
     function feriadosDoAno(ano) {
       const pascoa=dataPascoa(ano), lista={
-        [`${ano}-01-01`]:'Confraternização Universal', [`${ano}-04-21`]:'Tiradentes',
-        [`${ano}-05-01`]:'Dia do Trabalho', [`${ano}-09-07`]:'Independência do Brasil',
-        [`${ano}-10-12`]:'Nossa Senhora Aparecida', [`${ano}-11-02`]:'Finados',
-        [`${ano}-11-15`]:'Proclamação da República', [`${ano}-11-20`]:'Dia da Consciência Negra',
-        [`${ano}-12-10`]:'Aniversário de Londrina', [`${ano}-12-25`]:'Natal'
+        [`${ano}-01-01`]:'Confraternização Universal',
+        [`${ano}-04-21`]:'Tiradentes',
+        [`${ano}-05-01`]:'Dia do Trabalho',
+        [`${ano}-09-07`]:'Independência do Brasil',
+        [`${ano}-10-12`]:'Nossa Senhora Aparecida',
+        [`${ano}-11-02`]:'Finados',
+        [`${ano}-11-15`]:'Proclamação da República',
+        [`${ano}-11-20`]:'Dia Nacional de Zumbi e da Consciência Negra',
+        [`${ano}-12-10`]:'Aniversário de Londrina',
+        [`${ano}-12-25`]:'Natal'
       };
       lista[isoLocal(adicionarDias(pascoa,-47))]='Carnaval';
       lista[isoLocal(adicionarDias(pascoa,-2))]='Sexta-feira da Paixão';
-      lista[isoLocal(pascoa)]='Páscoa';
-      lista[isoLocal(adicionarDias(pascoa,60))]='Corpus Christi';
-      lista[isoLocal(adicionarDias(pascoa,68))]='Sagrado Coração de Jesus — Padroeiro de Londrina';
       return lista;
     }
     const FERIADOS = {};
-    for(let ano=Number(primeira.slice(0,4));ano<=Number(ultima.slice(0,4));ano++) Object.assign(FERIADOS,feriadosDoAno(ano));
+    for(let ano=Number(primeira.slice(0,4));ano<=2030;ano++) Object.assign(FERIADOS,feriadosDoAno(ano));
     function feriadoEm(data) { return FERIADOS[isoLocal(data)] || ''; }
+    function observacoesFeriadosMes(ano,mes) {
+      const resultado=[];
+      for(let dia=1, total=new Date(ano,mes,0).getDate();dia<=total;dia++) {
+        const nome=feriadoEm(new Date(ano,mes-1,dia));
+        if(nome) resultado.push(`${dia}: ${nome}`);
+      }
+      return resultado;
+    }
     function estaDeFerias(cfg,data) {
       const periodos = Array.isArray(cfg?.feriasPeriodos) ? cfg.feriasPeriodos : [];
       const dia = new Date(data.getFullYear(),data.getMonth(),data.getDate());
@@ -467,9 +479,12 @@
         const marcaFerias=feriasEquipe.length ? `<span class="ferias-equipe" title="Férias: ${escaparHtml(feriasEquipe.join(', '))}">Férias: ${escaparHtml(feriasEquipe.join(', '))}</span>` : '';
         calendario.insertAdjacentHTML('beforeend',`<button class="dia ${classe} ${selecionado} ${temAnotacao ? 'com-anotacao' : ''} ${natal ? 'natal' : ''} ${aniversario ? 'aniversario' : ''} ${feriasEquipe.length ? 'tem-ferias-equipe' : ''}" data-data="${chaveData}" title="${escaparHtml([feriado,textoAnotado].filter(Boolean).join(' • '))}"><span class="numero">${d}</span>${marcaFeriado}${balaoAniversario}${marca}${marcaFerias}${codigo ? `<span class="codigo">${codigo}</span>` : ''}</button>`);
       }
-      if (bloco?.observacoes.length) {
+      const observacoesMes = mesVisivel.getFullYear() >= 2027
+        ? observacoesFeriadosMes(mesVisivel.getFullYear(),mesVisivel.getMonth()+1)
+        : (bloco?.observacoes || []);
+      if (observacoesMes.length) {
         observacoes.hidden=false;
-        observacoes.innerHTML='<strong>Observações do mês</strong>'+bloco.observacoes.map(o=>`<p>${o}</p>`).join('');
+        observacoes.innerHTML='<strong>Observações do mês</strong>'+observacoesMes.map(o=>`<p>${escaparHtml(o)}</p>`).join('');
       } else observacoes.hidden=true;
       document.querySelector('#anterior').disabled = chave<=primeira;
       document.querySelector('#proximo').disabled = chave>=ultima;
